@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>パッシブデザイン分析ツール</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.10.0/umd/Recharts.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { font-family: 'Hiragino Sans','Noto Sans JP',-apple-system,sans-serif; margin:0; -webkit-font-smoothing:antialiased; }
+    input[type='range'] { -webkit-appearance:none; appearance:none; height:6px; border-radius:9999px; outline:none; cursor:pointer; }
+    input[type='range']::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:#2563eb; cursor:pointer; border:2px solid white; box-shadow:0 1px 4px rgba(37,99,235,0.4); }
+    input[type='range']::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:#2563eb; cursor:pointer; border:2px solid white; }
+    ::-webkit-scrollbar { width:4px; }
+    ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:2px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+
+  const { useState, useMemo } = React;
+  const { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+    ComposedChart, Line, Area, BarChart, Bar, Cell,
+    XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } = Recharts;
+
+  // ── DATA ──────────────────────────────────────────────────────
+  const REGIONS = [
+    { id:'sapporo', name:'札幌', prefecture:'北海道', zone:2, latitude:43.1,
+      climate:{ monthlyAvgTemp:[-3.5,-3.1,0.7,7.0,12.4,16.7,20.5,22.0,17.5,11.0,4.3,-0.9],
+        monthlyTempAmplitude:[5.0,5.5,7.5,9.0,10.0,9.5,9.0,9.0,9.5,8.5,6.5,5.0],
+        monthlySolarSouth:[3.2,4.5,5.8,5.9,5.2,4.5,4.2,4.8,5.2,4.5,2.8,2.5],
+        HDD:3500, CDD:50, prevailingWind:'N', avgWindSpeed:4.2 },
+      recommendations:{ UA:0.46, southWindowRatioMin:0.10, southWindowRatioMax:0.18,
+        thermalMassLevel:'high', shadingRequired:false, zehUA:0.40 },
+      passiveStrategies:['南面開口最大化','高断熱・高気密','熱容量活用','熱橋排除'] },
+    { id:'sendai', name:'仙台', prefecture:'宮城県', zone:4, latitude:38.3,
+      climate:{ monthlyAvgTemp:[2.0,2.6,5.7,11.0,16.0,19.8,23.6,25.3,21.4,15.2,9.2,4.2],
+        monthlyTempAmplitude:[6.5,7.0,8.5,9.5,9.5,8.5,7.5,8.0,9.0,9.0,7.5,6.5],
+        monthlySolarSouth:[3.8,5.2,6.5,6.2,5.5,4.2,3.5,4.2,5.5,5.2,3.8,3.2],
+        HDD:2200, CDD:300, prevailingWind:'NW', avgWindSpeed:3.8 },
+      recommendations:{ UA:0.75, southWindowRatioMin:0.12, southWindowRatioMax:0.20,
+        thermalMassLevel:'high', shadingRequired:false, zehUA:0.60 },
+      passiveStrategies:['南面大開口','断熱強化','夜間換気','日射制御'] },
+    { id:'tokyo', name:'東京', prefecture:'東京都', zone:6, latitude:35.7,
+      climate:{ monthlyAvgTemp:[5.4,6.1,9.4,14.3,18.8,22.1,25.8,27.4,23.9,18.5,13.2,8.3],
+        monthlyTempAmplitude:[8.0,8.5,9.0,10.0,9.5,8.0,7.5,8.0,9.0,9.5,9.0,8.0],
+        monthlySolarSouth:[4.2,5.5,6.8,6.5,5.5,4.0,3.5,4.2,5.5,5.5,4.2,3.8],
+        HDD:1400, CDD:750, prevailingWind:'N', avgWindSpeed:3.5 },
+      recommendations:{ UA:0.87, southWindowRatioMin:0.12, southWindowRatioMax:0.20,
+        thermalMassLevel:'medium', shadingRequired:true, zehUA:0.60 },
+      passiveStrategies:['日射遮蔽（夏）','通風促進','緑化','蓄熱活用'] },
+    { id:'nagoya', name:'名古屋', prefecture:'愛知県', zone:5, latitude:35.2,
+      climate:{ monthlyAvgTemp:[4.9,5.6,9.3,14.9,19.5,23.3,27.4,28.8,25.0,18.9,12.9,7.4],
+        monthlyTempAmplitude:[9.0,9.5,10.0,11.0,10.5,9.0,8.5,9.0,9.5,10.0,9.5,9.0],
+        monthlySolarSouth:[4.5,5.8,7.0,6.8,5.8,4.2,3.8,4.5,5.8,5.8,4.5,4.0],
+        HDD:1200, CDD:900, prevailingWind:'N', avgWindSpeed:3.2 },
+      recommendations:{ UA:0.87, southWindowRatioMin:0.10, southWindowRatioMax:0.18,
+        thermalMassLevel:'medium', shadingRequired:true, zehUA:0.60 },
+      passiveStrategies:['オーバーハング','通風計画','高断熱','夜間冷却'] },
+    { id:'osaka', name:'大阪', prefecture:'大阪府', zone:6, latitude:34.7,
+      climate:{ monthlyAvgTemp:[6.0,6.8,10.1,15.4,19.9,23.9,28.0,29.3,25.8,19.8,14.2,8.7],
+        monthlyTempAmplitude:[8.5,9.0,9.5,10.5,10.0,8.5,8.0,8.5,9.0,9.5,9.0,8.5],
+        monthlySolarSouth:[4.5,5.8,7.2,6.8,5.8,4.2,3.8,4.5,5.8,5.8,4.5,4.0],
+        HDD:1000, CDD:1050, prevailingWind:'N', avgWindSpeed:3.0 },
+      recommendations:{ UA:0.87, southWindowRatioMin:0.10, southWindowRatioMax:0.16,
+        thermalMassLevel:'medium', shadingRequired:true, zehUA:0.60 },
+      passiveStrategies:['日射遮蔽','夜間換気','緑化（打ち水）','高断熱'] },
+    { id:'fukuoka', name:'福岡', prefecture:'福岡県', zone:6, latitude:33.6,
+      climate:{ monthlyAvgTemp:[6.6,7.4,10.6,15.7,20.1,24.0,28.1,29.0,25.3,20.0,14.4,9.2],
+        monthlyTempAmplitude:[8.0,8.5,9.0,9.5,9.5,8.0,7.5,8.0,8.5,9.0,8.5,8.0],
+        monthlySolarSouth:[4.2,5.5,6.8,6.5,5.5,4.0,3.8,4.5,5.5,5.5,4.2,3.8],
+        HDD:900, CDD:1100, prevailingWind:'N', avgWindSpeed:3.3 },
+      recommendations:{ UA:0.87, southWindowRatioMin:0.08, southWindowRatioMax:0.15,
+        thermalMassLevel:'low', shadingRequired:true, zehUA:0.60 },
+      passiveStrategies:['通風最優先','日射遮蔽','軒・庇の活用','蓄熱抑制'] },
+    { id:'naha', name:'那覇', prefecture:'沖縄県', zone:8, latitude:26.2,
+      climate:{ monthlyAvgTemp:[17.2,17.4,19.5,22.3,25.3,28.2,29.8,29.4,28.3,25.8,22.7,19.2],
+        monthlyTempAmplitude:[5.5,5.5,5.5,6.0,5.5,4.5,4.0,4.0,4.5,5.5,5.5,5.5],
+        monthlySolarSouth:[3.2,3.8,4.5,4.5,4.5,4.2,5.0,5.5,5.0,4.5,3.8,3.2],
+        HDD:100, CDD:2800, prevailingWind:'NE', avgWindSpeed:5.5 },
+      recommendations:{ UA:3.32, southWindowRatioMin:0.05, southWindowRatioMax:0.10,
+        thermalMassLevel:'low', shadingRequired:true, zehUA:2.00 },
+      passiveStrategies:['卓越風利用','深い庇・軒','緑化','高床・床下通風'] },
+  ];
+  const MONTHS = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  const ZONE_COLORS = {1:'#1e40af',2:'#2563eb',3:'#0ea5e9',4:'#10b981',5:'#f59e0b',6:'#ef4444',7:'#dc2626',8:'#7c3aed'};
+
+  // ── SIMULATION ────────────────────────────────────────────────
+  const DT = 0.25;
+  const RHO_CP = 1200;
+
+  function outsideTemp(h, avg, amp) {
+    return avg + amp * Math.sin((2*Math.PI*(h-5))/24);
+  }
+
+  function solarIrr(hour, peakSolar, lat, month, face) {
+    const dec = 23.45 * Math.sin((2*Math.PI*((month-1)*30.5-81))/365);
+    const lr = lat*Math.PI/180, dr = dec*Math.PI/180;
+    const cosWs = -Math.tan(lr)*Math.tan(dr);
+    const ws = Math.acos(Math.max(-1,Math.min(1,cosWs)))*180/Math.PI;
+    const rise = 12-ws/15, set = 12+ws/15;
+    if (hour<rise||hour>set) return 0;
+    const ha = (hour-12)*15*Math.PI/180;
+    const sinA = Math.sin(lr)*Math.sin(dr)+Math.cos(lr)*Math.cos(dr)*Math.cos(ha);
+    const alt = Math.asin(Math.max(0,sinA));
+    const cosAz = (Math.sin(dr)-Math.sin(lr)*sinA)/(Math.cos(lr)*Math.cos(alt)+1e-9);
+    const az = Math.acos(Math.max(-1,Math.min(1,cosAz)));
+    const azS = hour<12 ? -az : az;
+    const nf = peakSolar*1.4;
+    if (face==='horizontal') return Math.max(0,nf*Math.sin(alt));
+    let inc = 0;
+    if (face==='south') inc = Math.cos(alt)*Math.cos(azS);
+    else if (face==='east') inc = Math.cos(alt)*Math.sin(-azS+Math.PI/2);
+    else inc = Math.cos(alt)*Math.sin(azS+Math.PI/2);
+    return Math.max(0,nf*inc);
+  }
+
+  function envelopeUA(p) {
+    const d = Math.sqrt(p.floorArea/p.widthDepthRatio);
+    const w = p.widthDepthRatio*d;
+    const wallG = 2*(w+d)*p.height;
+    const winRatio = p.southWindowRatio+p.northWindowRatio+p.eastWindowRatio+p.westWindowRatio;
+    const winA = winRatio*p.floorArea;
+    return (wallG-winA)*p.wallUValue + p.floorArea*p.roofUValue + p.floorArea*p.floorUValue + winA*p.windowUValue;
+  }
+
+  function runSim(params, region, month) {
+    const avg = region.climate.monthlyAvgTemp[month];
+    const amp = region.climate.monthlyTempAmplitude[month]/2;
+    const ps = region.climate.monthlySolarSouth[month];
+    const vol = params.floorArea*params.height*1.5;
+    const UA = envelopeUA(params);
+    const C = params.thermalMass*1000*params.floorArea;
+    const tau = C/UA/3600;
+    const sA = params.southWindowRatio*params.floorArea;
+    const eA = params.eastWindowRatio*params.floorArea;
+    const wA = params.westWindowRatio*params.floorArea;
+    const refUA = params.floorArea*2.0;
+    const refC = 30000*params.floorArea;
+    const steps = Math.round(24/DT);
+    let arr = [], Tr = avg, Tref = avg;
+    for (let pass=0;pass<5;pass++) {
+      Tr=avg; Tref=avg; arr=[];
+      for (let i=0;i<steps;i++) {
+        const hr = i*DT;
+        const To = outsideTemp(hr,avg,amp);
+        const Is = solarIrr(hr,ps,region.latitude,month,'south');
+        const Ie = solarIrr(hr,ps*0.7,region.latitude,month,'east');
+        const Iw = solarIrr(hr,ps*0.7,region.latitude,month,'west');
+        const sf = region.recommendations.shadingRequired ? Math.max(0.3,1-params.overhanRatio*1.5) : 1.0;
+        const Qs = params.SHGC*(sA*Is*sf+eA*Ie+wA*Iw);
+        const Qc = UA*(To-Tr);
+        const Qv = (params.ACH*vol*RHO_CP)/3600*(To-Tr);
+        const Qi = params.occupants*80+300;
+        const Qt = Qc+Qs+Qv+Qi;
+        const Qcr = refUA*(To-Tref);
+        const Qvr = (params.ACH*1.5*vol*RHO_CP)/3600*(To-Tref);
+        const Qsr = 0.6*sA*Is*0.3;
+        const Qtr = Qcr+Qsr+Qvr+Qi;
+        Tr += Qt/C*DT*3600;
+        Tref += Qtr/refC*DT*3600;
+        if (pass===4) arr.push({hour:Math.round(hr*10)/10,T_outside:To,T_room:Tr,T_room_ref:Tref,Q_solar:Qs,Q_conduction:Qc,Q_ventilation:Qv});
+      }
+    }
+    const temps=arr.map(h=>h.T_room), oTemps=arr.map(h=>h.T_outside);
+    const indMin=Math.min(...temps), indMax=Math.max(...temps);
+    const oPeak=oTemps.indexOf(Math.max(...oTemps))*DT;
+    const rPeak=temps.indexOf(Math.max(...temps))*DT;
+    const lag=((rPeak-oPeak+24)%24);
+    const comfort=arr.filter(h=>h.T_room>=18&&h.T_room<=28).length*DT;
+    let cE=0,hE=0,cEr=0,hEr=0;
+    for (const h of arr) {
+      if(h.T_room>26) cE+=(h.T_room-26)*UA*DT;
+      if(h.T_room<20) hE+=(20-h.T_room)*UA*DT;
+      if(h.T_room_ref>26) cEr+=(h.T_room_ref-26)*refUA*DT;
+      if(h.T_room_ref<20) hEr+=(20-h.T_room_ref)*refUA*DT;
+    }
+    return { hourly:arr, indoorMin:indMin, indoorMax:indMax, thermalLag:lag,
+      comfortHours:comfort, thermalTimeConstant:tau,
+      dailyCoolingEnergy:cE/3600000, dailyHeatingEnergy:hE/3600000,
+      dailyCoolingEnergy_ref:cEr/3600000, dailyHeatingEnergy_ref:hEr/3600000 };
+  }
+
+  function calcScores(params, region) {
+    const rec = region.recommendations;
+    const UA = envelopeUA(params);
+    const UAref = params.floorArea*0.87;
+    const tgt = (rec.southWindowRatioMin+rec.southWindowRatioMax)/2;
+    const solar = Math.max(0,100-Math.abs(params.southWindowRatio-tgt)/tgt*100);
+    const ins = Math.min(100,Math.max(0,(1-UA/(UAref*1.5))*100+30));
+    const tMass = rec.thermalMassLevel==='high'?150:rec.thermalMassLevel==='medium'?100:60;
+    const mass = Math.min(100,(params.thermalMass/tMass)*100);
+    const vr = params.southWindowRatio+params.northWindowRatio+params.eastWindowRatio+params.westWindowRatio;
+    const vent = Math.min(100,vr*500);
+    const shade = rec.shadingRequired ? Math.min(100,params.overhanRatio*200) : Math.max(0,100-params.overhanRatio*100);
+    const overall = solar*0.25+ins*0.30+mass*0.20+vent*0.15+shade*0.10;
+    return { solarUtilization:Math.round(solar), insulation:Math.round(ins),
+      thermalMass:Math.round(mass), naturalVentilation:Math.round(vent),
+      shading:Math.round(shade), overall:Math.round(overall) };
+  }
+
+  function uaValue(params) { return envelopeUA(params)/params.floorArea; }
+
+  // ── BuildingModel ─────────────────────────────────────────────
+  function tColor(t) {
+    if(t<10) return '#60a5fa'; if(t<18) return '#93c5fd';
+    if(t<22) return '#86efac'; if(t<26) return '#fde68a';
+    if(t<30) return '#fca5a5'; return '#ef4444';
+  }
+
+  function BuildingModel({ params, indoorTemp, outdoorTemp, month }) {
+    const s=28, cx=220, cy=80;
+    const W=10, D=8, H=3, rH=5;
+    function iso(x,y,z) { return [cx+(x-y)*s*0.866, cy+(x+y)*s*0.5-z*s]; }
+    function pts(...cs) { return cs.map(([x,y])=>`${x},${y}`).join(' '); }
+    const [sw,se,ne,nw] = [iso(0,0,0),iso(W,0,0),iso(W,D,0),iso(0,D,0)];
+    const [swT,seT,neT,nwT] = [iso(0,0,H),iso(W,0,H),iso(W,D,H),iso(0,D,H)];
+    const [rE,rW] = [iso(W/2,0,rH),iso(W/2,D,rH)];
+    const sw1={tl:iso(2,0,H*0.4),br:iso(5,0,H*0.85)};
+    const sw2={tl:iso(5.5,0,H*0.4),br:iso(8,0,H*0.85)};
+    const wc = params.wallUValue<0.4?'#dbeafe':params.wallUValue<0.7?'#bfdbfe':'#e2e8f0';
+    const isSummer = month>=5&&month<=9;
+    const swc = isSummer&&params.overhanRatio>0.3?'#dbeafe':'#fef9c3';
+    return (
+      <div>
+        <svg width="440" height="300" className="w-full" viewBox="0 0 440 300">
+          <defs>
+            <marker id="arr" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" fill="#f59e0b"/>
+            </marker>
+          </defs>
+          <ellipse cx={cx+s*2} cy={cy+(W+D)*s*0.5+8} rx={s*8} ry={s*1.5} fill="rgba(0,0,0,0.07)"/>
+          <polygon points={pts([sw[0]-s,sw[1]+s*0.5],[se[0]+s,se[1]+s*0.5],[ne[0]+s,ne[1]+s*0.5],[nw[0]-s,nw[1]+s*0.5])} fill="#e8f5e9" stroke="#a7f3d0" strokeWidth="1"/>
+          <polygon points={pts(nw,ne,neT,nwT)} fill="#b0bec5" stroke="#90a4ae" strokeWidth="1"/>
+          <polygon points={pts(se,ne,neT,seT)} fill="#cfd8dc" stroke="#b0bec5" strokeWidth="1"/>
+          <polygon points={pts(sw,se,seT,swT)} fill={wc} stroke="#93c5fd" strokeWidth="1.5"/>
+          <polygon points={pts(sw,se,seT,swT)} fill={isSummer?"rgba(251,191,36,0.1)":"rgba(251,191,36,0.25)"}/>
+          {/* South windows */}
+          {[sw1,sw2].map((w,i)=>(
+            <g key={i}>
+              <polygon points={pts(w.tl,[w.br[0],w.tl[1]],w.br,[w.tl[0],w.br[1]])} fill={swc} stroke="#3b82f6" strokeWidth="1.5"/>
+              <line x1={w.tl[0]} y1={(w.tl[1]+w.br[1])/2} x2={w.br[0]} y2={(w.tl[1]+w.br[1])/2} stroke="#3b82f6" strokeWidth="0.8"/>
+              <line x1={(w.tl[0]+w.br[0])/2} y1={w.tl[1]} x2={(w.tl[0]+w.br[0])/2} y2={w.br[1]} stroke="#3b82f6" strokeWidth="0.8"/>
+            </g>
+          ))}
+          {/* Overhang */}
+          {params.overhanRatio>0.05&&(
+            <polygon points={pts(
+              [swT[0],swT[1]-params.overhanRatio*s*2.5],[seT[0],seT[1]-params.overhanRatio*s*2.5],
+              [seT[0]-params.overhanRatio*s*1.7,seT[1]-params.overhanRatio*s*2.5+params.overhanRatio*s],
+              [swT[0]-params.overhanRatio*s*1.7,swT[1]-params.overhanRatio*s*2.5+params.overhanRatio*s]
+            )} fill="#94a3b8" stroke="#64748b" strokeWidth="1"/>
+          )}
+          {/* Roof */}
+          <polygon points={pts(nwT,neT,rW,rE)} fill="#94a3b8" stroke="#64748b" strokeWidth="1"/>
+          <polygon points={pts(swT,seT,rE,rW)} fill="#e2e8f0" stroke="#64748b" strokeWidth="1.5"/>
+          <polygon points={pts(swT,nwT,rW,rE)} fill="#cbd5e1" stroke="#64748b" strokeWidth="1"/>
+          <line x1={rE[0]} y1={rE[1]} x2={rW[0]} y2={rW[1]} stroke="#475569" strokeWidth="2"/>
+          {/* Sun rays */}
+          {(!isSummer||params.overhanRatio<0.3)&&[0,1,2].map(i=>{
+            const x1=sw1.tl[0]+(i+0.5)*(sw1.br[0]-sw1.tl[0])/3-25;
+            return <line key={i} x1={x1} y1={sw1.tl[1]-38} x2={x1+18} y2={sw1.tl[1]-4} stroke="#f59e0b" strokeWidth="2" markerEnd="url(#arr)"/>;
+          })}
+          {(!isSummer||params.overhanRatio<0.3)&&<text x={sw1.tl[0]-38} y={sw1.tl[1]-42} fontSize="9" fill="#d97706" fontWeight="600">日射</text>}
+          {/* Indoor temp */}
+          <rect x="8" y="215" width="82" height="52" rx="8" fill="white" stroke="#e2e8f0" strokeWidth="1.5"/>
+          <rect x="8" y="215" width="82" height="14" rx="4" fill={tColor(indoorTemp)} opacity="0.8"/>
+          <text x="49" y="225" fontSize="8" textAnchor="middle" fill="#1e3a8a" fontWeight="700">室内温度</text>
+          <text x="49" y="244" fontSize="17" textAnchor="middle" fill="#1e293b" fontWeight="800">{indoorTemp.toFixed(1)}°C</text>
+          <text x="49" y="259" fontSize="8" textAnchor="middle" fill="#64748b">外気: {outdoorTemp.toFixed(1)}°C</text>
+          {/* Compass */}
+          <g transform="translate(405,60)">
+            <circle r="22" fill="white" stroke="#e2e8f0" strokeWidth="1.5"/>
+            <text x="0" y="-12" textAnchor="middle" fontSize="9" fontWeight="700" fill="#ef4444">N</text>
+            <text x="0" y="18" textAnchor="middle" fontSize="9" fontWeight="700" fill="#3b82f6">S</text>
+            <text x="-16" y="4" textAnchor="middle" fontSize="9" fill="#64748b">W</text>
+            <text x="16" y="4" textAnchor="middle" fontSize="9" fill="#64748b">E</text>
+            <polygon points="0,-8 3,-2 -3,-2" fill="#ef4444"/>
+          </g>
+          <text x={iso(W/2,0,0)[0]} y={iso(W/2,0,0)[1]+16} textAnchor="middle" fontSize="9" fill="#1e3a8a" fontWeight="600">南面</text>
+        </svg>
+        <div className="flex flex-wrap gap-3 mt-1 px-2 text-xs text-gray-500">
+          <div className="flex items-center gap-1"><div style={{width:14,height:10,background:'#fef9c3',border:'1px solid #3b82f6',borderRadius:2}}/><span>南面窓</span></div>
+          <div className="flex items-center gap-1"><div style={{width:14,height:10,background:'#e2e8f0',border:'1px solid #64748b',borderRadius:2}}/><span>断熱外皮</span></div>
+          <div className="flex items-center gap-1"><span style={{color:'#f59e0b',fontWeight:'bold'}}>→</span><span>日射</span></div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── SimulationChart ───────────────────────────────────────────
+  function SimulationChart({ data, month }) {
+    const all = data.flatMap(d=>[d.T_outside,d.T_room,d.T_room_ref]);
+    const mn = Math.floor(Math.min(...all)-1), mx = Math.ceil(Math.max(...all)+1);
+    const ticks=[0,3,6,9,12,15,18,21,24];
+    const comfPct = Math.round(data.filter(d=>d.T_room>=18&&d.T_room<=28).length/data.length*100);
+    const roomTemps=data.map(d=>d.T_room);
+    const swing=Math.round((Math.max(...roomTemps)-Math.min(...roomTemps))*10)/10;
+    const outSwing=Math.round((Math.max(...data.map(d=>d.T_outside))-Math.min(...data.map(d=>d.T_outside)))*10)/10;
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h3 className="text-sm font-bold text-gray-800">24時間温度シミュレーション</h3>
+            <p className="text-xs text-gray-500">{MONTHS[month]} — 非定常熱応答解析</p>
+          </div>
+          <div className="flex gap-2 text-xs">
+            <span className="flex items-center gap-1"><span style={{display:'inline-block',width:12,height:2,background:'#2563eb'}}/> 設計値</span>
+            <span className="flex items-center gap-1"><span style={{display:'inline-block',width:12,height:0,borderTop:'2px dashed #fb923c'}}/> 参照</span>
+            <span className="flex items-center gap-1"><span style={{display:'inline-block',width:12,height:2,background:'#ef4444'}}/> 外気</span>
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={200}>
+          <ComposedChart data={data} margin={{top:4,right:8,left:0,bottom:4}}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
+            <XAxis dataKey="hour" ticks={ticks} tickFormatter={v=>`${v}時`} tick={{fontSize:10,fill:'#64748b'}} domain={[0,24]}/>
+            <YAxis domain={[mn,mx]} tick={{fontSize:10,fill:'#64748b'}} tickFormatter={v=>`${v}°C`} width={44}/>
+            <Tooltip contentStyle={{fontSize:11,borderRadius:8}} formatter={(v,n)=>[`${Number(v).toFixed(1)}°C`,n]}/>
+            <ReferenceLine y={18} stroke="#10b981" strokeDasharray="4 4" strokeWidth={1}/>
+            <ReferenceLine y={28} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1}/>
+            <Line type="monotone" dataKey="T_outside" stroke="#ef4444" strokeWidth={2} dot={false} name="外気温"/>
+            <Line type="monotone" dataKey="T_room_ref" stroke="#fb923c" strokeWidth={1.5} strokeDasharray="6 3" dot={false} name="参照建物"/>
+            <Line type="monotone" dataKey="T_room" stroke="#2563eb" strokeWidth={2.5} dot={false} name="設計建物"/>
+          </ComposedChart>
+        </ResponsiveContainer>
+        <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+          <div className="bg-blue-50 rounded-lg p-2 text-center"><div className="text-blue-700 font-bold text-base">{swing}°C</div><div className="text-blue-500">室温日較差</div></div>
+          <div className="bg-red-50 rounded-lg p-2 text-center"><div className="text-red-700 font-bold text-base">{outSwing}°C</div><div className="text-red-500">外気温日較差</div></div>
+          <div className="bg-green-50 rounded-lg p-2 text-center"><div className="text-green-700 font-bold text-base">{comfPct}%</div><div className="text-green-500">快適時間率</div></div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── PassiveRadar ──────────────────────────────────────────────
+  function scoreColor(s) { return s>=80?'#16a34a':s>=60?'#2563eb':s>=40?'#f59e0b':'#ef4444'; }
+  function scoreLabel(s) { return s>=80?'優秀':s>=60?'良好':s>=40?'普通':'要改善'; }
+
+  function PassiveRadar({ scores }) {
+    const data=[
+      {subject:'日射利用',value:scores.solarUtilization,fullMark:100},
+      {subject:'断熱性能',value:scores.insulation,fullMark:100},
+      {subject:'熱容量',value:scores.thermalMass,fullMark:100},
+      {subject:'自然換気',value:scores.naturalVentilation,fullMark:100},
+      {subject:'日射遮蔽',value:scores.shading,fullMark:100},
+    ];
+    const c=scoreColor(scores.overall);
+    const items=[['solarUtilization','日射利用'],['insulation','断熱性能'],['thermalMass','熱容量'],['naturalVentilation','自然換気'],['shading','日射遮蔽']];
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-bold text-gray-800">パッシブデザイン評価</h3>
+          <div className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold text-white" style={{background:c}}>
+            {scores.overall}点 — {scoreLabel(scores.overall)}
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={190}>
+          <RadarChart data={data}>
+            <PolarGrid stroke="#e2e8f0"/>
+            <PolarAngleAxis dataKey="subject" tick={{fontSize:10,fill:'#475569',fontWeight:600}}/>
+            <PolarRadiusAxis angle={90} domain={[0,100]} tick={{fontSize:8,fill:'#94a3b8'}} tickCount={4}/>
+            <Radar name="スコア" dataKey="value" stroke="#2563eb" fill="#3b82f6" fillOpacity={0.25} strokeWidth={2}/>
+            <Tooltip formatter={(v)=>[`${v}点`,'スコア']} contentStyle={{fontSize:11,borderRadius:8}}/>
+          </RadarChart>
+        </ResponsiveContainer>
+        <div className="grid grid-cols-1 gap-1 mt-1">
+          {items.map(([k,label])=>{
+            const v=scores[k]; const c=scoreColor(v);
+            return (
+              <div key={k} className="flex items-center gap-2">
+                <span className="text-xs text-gray-600 w-14 shrink-0">{label}</span>
+                <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full" style={{width:`${v}%`,background:c}}/>
+                </div>
+                <span className="text-xs font-bold w-7 text-right" style={{color:c}}>{v}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ── ClimateCard ───────────────────────────────────────────────
+  function ClimateCard({ region, month }) {
+    const c=region.climate;
+    const tempData=MONTHS.map((m,i)=>({month:(i+1)+'月',temp:c.monthlyAvgTemp[i],active:i===month}));
+    return (
+      <div>
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-gray-800">{region.name}の気候概要</h3>
+              <span className="text-xs px-2 py-0.5 rounded-full text-white font-bold" style={{background:ZONE_COLORS[region.zone]}}>{region.zone}地域</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">{region.prefecture} / 緯度 {region.latitude}°N</p>
+          </div>
+          <div className="text-right text-xs">
+            <div>HDD: <span className="font-bold text-blue-700">{c.HDD}</span></div>
+            <div>CDD: <span className="font-bold text-red-600">{c.CDD}</span></div>
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={90}>
+          <BarChart data={tempData} margin={{top:0,right:0,left:-22,bottom:0}}>
+            <XAxis dataKey="month" tick={{fontSize:8,fill:'#94a3b8'}}/>
+            <YAxis tick={{fontSize:8,fill:'#94a3b8'}} tickFormatter={v=>`${v}°`}/>
+            <Tooltip formatter={(v)=>[`${Number(v).toFixed(1)}°C`,'月平均気温']} contentStyle={{fontSize:11,borderRadius:6}}/>
+            <Bar dataKey="temp" radius={[3,3,0,0]}>
+              {tempData.map((d,i)=>(
+                <Cell key={i} fill={d.active?'#2563eb':d.temp<0?'#93c5fd':d.temp<15?'#7dd3fc':d.temp<25?'#86efac':'#fca5a5'} opacity={d.active?1:0.7}/>
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        <div className="grid grid-cols-3 gap-2 mt-2">
+          <div className="bg-blue-50 rounded-lg p-2 text-center">
+            <div className="text-blue-700 font-bold text-sm">{c.monthlyAvgTemp[month].toFixed(1)}°C</div>
+            <div className="text-blue-500 text-xs">{MONTHS[month]}平均</div>
+          </div>
+          <div className="bg-amber-50 rounded-lg p-2 text-center">
+            <div className="text-amber-700 font-bold text-sm">{c.monthlySolarSouth[month].toFixed(1)}</div>
+            <div className="text-amber-500 text-xs">南面日射 kWh/m²</div>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-2 text-center">
+            <div className="text-slate-700 font-bold text-sm">{c.avgWindSpeed}m/s</div>
+            <div className="text-slate-500 text-xs">{c.prevailingWind}卓越風</div>
+          </div>
+        </div>
+        <div className="mt-2">
+          <p className="text-xs font-semibold text-gray-700 mb-1">地域のパッシブ戦略</p>
+          <div className="flex flex-wrap gap-1">
+            {region.passiveStrategies.map(s=>(
+              <span key={s} className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">{s}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── DesignPanel ───────────────────────────────────────────────
+  function Slider({ label, value, min, max, step, unit, onChange, fmt }) {
+    const pct=((value-min)/(max-min))*100;
+    return (
+      <div className="mb-3">
+        <div className="flex justify-between items-center mb-1">
+          <label className="text-xs font-medium text-gray-700">{label}</label>
+          <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">{fmt?fmt(value):value}{unit}</span>
+        </div>
+        <input type="range" min={min} max={max} step={step} value={value}
+          onChange={e=>onChange(Number(e.target.value))}
+          className="w-full"
+          style={{background:`linear-gradient(to right,#2563eb ${pct}%,#e2e8f0 ${pct}%)`}}/>
+      </div>
+    );
+  }
+
+  function DesignPanel({ params, onChange, region }) {
+    const set=(k,v)=>onChange({...params,[k]:v});
+    const ua=uaValue(params);
+    const rec=region.recommendations;
+    const uaOk=ua<=rec.UA;
+    const sOk=params.southWindowRatio>=rec.southWindowRatioMin&&params.southWindowRatio<=rec.southWindowRatioMax;
+    return (
+      <div className="space-y-4 text-sm">
+        <div className={`flex items-center justify-between p-2.5 rounded-lg border-2 ${uaOk?'border-green-300 bg-green-50':'border-orange-300 bg-orange-50'}`}>
+          <div>
+            <div className="text-xs font-bold text-gray-700">外皮平均熱貫流率 UA値</div>
+            <div className="text-xs text-gray-500">目標: {rec.UA} W/(m²K)以下</div>
+          </div>
+          <div className={`text-xl font-black ${uaOk?'text-green-700':'text-orange-700'}`}>{ua.toFixed(2)}</div>
+        </div>
+        <div>
+          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">建物形状</h4>
+          <Slider label="床面積" value={params.floorArea} min={30} max={200} step={5} unit=" m²" onChange={v=>set('floorArea',v)}/>
+          <Slider label="階高" value={params.height} min={2.2} max={3.5} step={0.1} unit=" m" onChange={v=>set('height',v)} fmt={v=>v.toFixed(1)}/>
+        </div>
+        <div>
+          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">断熱外皮</h4>
+          <Slider label="壁 U値" value={params.wallUValue} min={0.1} max={1.5} step={0.05} unit=" W/(m²K)" onChange={v=>set('wallUValue',v)} fmt={v=>v.toFixed(2)}/>
+          <Slider label="屋根 U値" value={params.roofUValue} min={0.05} max={0.8} step={0.05} unit=" W/(m²K)" onChange={v=>set('roofUValue',v)} fmt={v=>v.toFixed(2)}/>
+          <Slider label="床 U値" value={params.floorUValue} min={0.1} max={0.8} step={0.05} unit=" W/(m²K)" onChange={v=>set('floorUValue',v)} fmt={v=>v.toFixed(2)}/>
+        </div>
+        <div>
+          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">開口部</h4>
+          <div className={`mb-1 text-xs px-2 py-1 rounded ${sOk?'bg-green-100 text-green-700':'bg-orange-100 text-orange-700'}`}>
+            推奨南面比: {(rec.southWindowRatioMin*100).toFixed(0)}〜{(rec.southWindowRatioMax*100).toFixed(0)}%
+          </div>
+          <Slider label="南面窓比率" value={params.southWindowRatio} min={0.02} max={0.4} step={0.01} unit="%" onChange={v=>set('southWindowRatio',v)} fmt={v=>(v*100).toFixed(0)}/>
+          <Slider label="北面窓比率" value={params.northWindowRatio} min={0} max={0.15} step={0.01} unit="%" onChange={v=>set('northWindowRatio',v)} fmt={v=>(v*100).toFixed(0)}/>
+          <Slider label="窓 U値" value={params.windowUValue} min={0.5} max={6.0} step={0.1} unit=" W/(m²K)" onChange={v=>set('windowUValue',v)} fmt={v=>v.toFixed(1)}/>
+          <Slider label="SHGC" value={params.SHGC} min={0.1} max={0.85} step={0.05} unit="" onChange={v=>set('SHGC',v)} fmt={v=>v.toFixed(2)}/>
+        </div>
+        <div>
+          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">蓄熱・換気</h4>
+          <Slider label="熱容量" value={params.thermalMass} min={20} max={300} step={10} unit=" kJ/(m²K)" onChange={v=>set('thermalMass',v)}/>
+          <Slider label="換気回数" value={params.ACH} min={0.2} max={3.0} step={0.1} unit=" 回/h" onChange={v=>set('ACH',v)} fmt={v=>v.toFixed(1)}/>
+          <Slider label="庇オーバーハング比" value={params.overhanRatio} min={0} max={0.8} step={0.05} unit="" onChange={v=>set('overhanRatio',v)} fmt={v=>v.toFixed(2)}/>
+          <Slider label="在室人数" value={params.occupants} min={0} max={8} step={1} unit=" 人" onChange={v=>set('occupants',v)}/>
+        </div>
+      </div>
+    );
+  }
+
+  // ── MetricsPanel ──────────────────────────────────────────────
+  function MetricsPanel({ result, region, month }) {
+    function savPct(d,r){ if(!r) return '—'; const p=((r-d)/r)*100; return `${p>=0?'-':'+'}${Math.abs(p).toFixed(0)}%`; }
+    const cs=savPct(result.dailyCoolingEnergy,result.dailyCoolingEnergy_ref);
+    const hs=savPct(result.dailyHeatingEnergy,result.dailyHeatingEnergy_ref);
+    return (
+      <div>
+        <h3 className="text-sm font-bold text-gray-800 mb-3">シミュレーション結果 — {MONTHS[month]}</h3>
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          {[
+            {label:'熱時定数 τ',val:`${result.thermalTimeConstant.toFixed(1)}h`,sub:'建物の熱応答速度',bg:'bg-blue-50'},
+            {label:'位相遅れ',val:`${result.thermalLag.toFixed(1)}h`,sub:'外気→室温ピーク差',bg:'bg-indigo-50'},
+            {label:'室温最小',val:`${result.indoorMin.toFixed(1)}°C`,sub:result.indoorMin>=18?'✓ 快適域内':'⚠ 暖房必要',bg:result.indoorMin>=18?'bg-green-50':'bg-blue-50'},
+            {label:'室温最高',val:`${result.indoorMax.toFixed(1)}°C`,sub:result.indoorMax<=28?'✓ 快適域内':'⚠ 冷房必要',bg:result.indoorMax<=28?'bg-green-50':'bg-red-50'},
+          ].map(({label,val,sub,bg})=>(
+            <div key={label} className={`rounded-xl p-3 ${bg} border border-gray-100`}>
+              <div className="text-xs text-gray-500 mb-1">{label}</div>
+              <div className="text-xl font-black text-gray-800">{val}</div>
+              <div className="text-xs text-gray-400 mt-0.5">{sub}</div>
+            </div>
+          ))}
+        </div>
+        <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-3 mb-2 border border-green-100">
+          <div className="text-xs font-bold text-green-800 mb-2">エネルギー削減効果（vs 参照建物）</div>
+          <div className="grid grid-cols-2 gap-3">
+            {[{label:'冷房負荷（日）',v:result.dailyCoolingEnergy,s:cs},{label:'暖房負荷（日）',v:result.dailyHeatingEnergy,s:hs}].map(({label,v,s})=>(
+              <div key={label}>
+                <div className="text-xs text-gray-600 mb-0.5">{label}</div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-lg font-black text-gray-800">{v.toFixed(2)}</span>
+                  <span className="text-xs text-gray-500">kWh</span>
+                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${s.startsWith('-')?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{s}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-3 bg-amber-50 rounded-xl p-3 border border-amber-100">
+          <div className="text-3xl font-black text-amber-700">{((result.comfortHours/24)*100).toFixed(0)}%</div>
+          <div className="flex-1">
+            <div className="text-xs font-bold text-amber-800">快適時間率</div>
+            <div className="text-xs text-amber-600">{result.comfortHours.toFixed(1)}時間 / 24h が18〜28°C</div>
+            <div className="mt-1 h-2 bg-amber-200 rounded-full overflow-hidden">
+              <div className="h-full bg-amber-500 rounded-full" style={{width:`${(result.comfortHours/24)*100}%`}}/>
+            </div>
+          </div>
+        </div>
+        <div className="mt-2 p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+          <div className="text-xs font-bold text-slate-700 mb-1">{region.name}（{region.zone}地域）推奨基準</div>
+          <div className="flex gap-2 text-xs flex-wrap">
+            <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full">省エネ: {region.recommendations.UA} W/(m²K)</span>
+            <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full">ZEH: {region.recommendations.zehUA} W/(m²K)</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Dashboard ─────────────────────────────────────────────────
+  const DEFAULT = {
+    floorArea:100, height:2.7, widthDepthRatio:1.25, orientation:0,
+    wallUValue:0.35, roofUValue:0.15, floorUValue:0.25,
+    southWindowRatio:0.16, northWindowRatio:0.03, eastWindowRatio:0.03, westWindowRatio:0.02,
+    windowUValue:1.4, SHGC:0.55, thermalMass:120, ACH:0.5, occupants:4, overhanRatio:0.3,
+  };
+
+  function Dashboard() {
+    const [regionId, setRegionId] = useState('tokyo');
+    const [month, setMonth] = useState(7);
+    const [params, setParams] = useState(DEFAULT);
+    const [tab, setTab] = useState('design');
+
+    const region = REGIONS.find(r=>r.id===regionId)||REGIONS[2];
+    const result = useMemo(()=>runSim(params,region,month),[params,region,month]);
+    const scores = useMemo(()=>calcScores(params,region),[params,region]);
+    const midDay = result.hourly.find(h=>h.hour>=12)||result.hourly[0];
+    const zc = ZONE_COLORS[region.zone];
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 to-blue-50 flex flex-col">
+        {/* Header */}
+        <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-20">
+          <div className="max-w-screen-2xl mx-auto px-4 py-3 flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-md" style={{background:'linear-gradient(135deg,#2563eb,#4f46e5)'}}>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="white" strokeWidth="2"><path d="M3 12L12 3L21 12V20H15V15H9V20H3V12Z"/></svg>
+              </div>
+              <div>
+                <h1 className="text-base font-black text-gray-900 leading-none">パッシブデザイン分析</h1>
+                <p className="text-xs text-gray-500">非定常住宅熱シミュレーション</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              {REGIONS.map(r=>(
+                <button key={r.id} onClick={()=>setRegionId(r.id)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${r.id===regionId?'text-white shadow-md scale-105':'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                  style={r.id===regionId?{background:ZONE_COLORS[r.zone]}:{}}>{r.name}</button>
+              ))}
+            </div>
+            <div className="ml-auto flex items-center gap-1">
+              <span className="text-xs text-gray-500 mr-1">解析月:</span>
+              {MONTHS.map((m,i)=>(
+                <button key={i} onClick={()=>setMonth(i)}
+                  className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${i===month?'bg-blue-600 text-white shadow':'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{i+1}</button>
+              ))}
+            </div>
+          </div>
+        </header>
+
+        <div className="flex flex-1 max-w-screen-2xl mx-auto w-full px-3 py-3 gap-3">
+          {/* Sidebar */}
+          <aside className="w-72 shrink-0 flex flex-col gap-3">
+            <div className="bg-white rounded-2xl p-1 flex gap-1 shadow-sm border border-gray-100">
+              {[['design','設計条件'],['climate','気候データ']].map(([k,l])=>(
+                <button key={k} onClick={()=>setTab(k)}
+                  className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${tab===k?'bg-blue-600 text-white shadow':'text-gray-500 hover:text-gray-700'}`}>{l}</button>
+              ))}
+            </div>
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex-1 overflow-y-auto" style={{maxHeight:'calc(100vh - 130px)'}}>
+              {tab==='design'
+                ? <DesignPanel params={params} onChange={setParams} region={region}/>
+                : <ClimateCard region={region} month={month}/>}
+            </div>
+          </aside>
+
+          {/* Main */}
+          <main className="flex-1 flex flex-col gap-3 min-w-0">
+            <div className="grid gap-3" style={{gridTemplateColumns:'3fr 2fr'}}>
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-sm font-bold text-gray-800">建物モデル</h2>
+                  <div className="flex gap-2 text-xs">
+                    <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-full">{params.floorArea}m² / {params.height}m高</span>
+                    <span className="px-2 py-1 rounded-full text-white font-medium" style={{background:zc}}>{region.zone}地域</span>
+                  </div>
+                </div>
+                <BuildingModel params={params} indoorTemp={midDay?.T_room??20} outdoorTemp={midDay?.T_outside??20} month={month}/>
+              </div>
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                <PassiveRadar scores={scores}/>
+              </div>
+            </div>
+            <div className="grid gap-3" style={{gridTemplateColumns:'3fr 2fr'}}>
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                <SimulationChart data={result.hourly} month={month}/>
+              </div>
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 overflow-y-auto">
+                <MetricsPanel result={result} region={region} month={month}/>
+              </div>
+            </div>
+          </main>
+        </div>
+
+        <footer className="text-center py-2 text-xs text-gray-400 border-t border-gray-100 bg-white">
+          非定常住宅熱シミュレーション — パッシブデザイン分析ツール
+        </footer>
+      </div>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<Dashboard/>);
+  </script>
+</body>
+</html>
