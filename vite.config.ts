@@ -10,7 +10,7 @@ function patchModuleType(): Plugin {
     closeBundle() {
       const file = 'dist/index.html'
       let html = readFileSync(file, 'utf8')
-      html = html.replace(/<script type="module"[^>]*>/g, '<script>')
+      html = html.replace(/<script type="module"[^>]*>/g, '<script defer>')
       writeFileSync(file, html)
     },
   }
